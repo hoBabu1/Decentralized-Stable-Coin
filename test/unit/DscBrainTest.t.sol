@@ -7,6 +7,7 @@ import {DecentralizedStableCoin} from "src/decentralizedStableCoin.sol";
 import {DSCBrain} from "src/DSCBrain.sol";
 import {DeployDSC} from "script/deployDSC.s.sol";
 import {HelperConfig} from "script/HelperConfig.s.sol";
+import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 
 contract DscBrainTest is Test {
     DeployDSC deployer;
@@ -16,10 +17,14 @@ contract DscBrainTest is Test {
     address ethUsdPriceFeed;
     address weth;
 
+    address public USER = makeAddr("hoBabu");
+    uint256 public constant AMOUNT_COLLETRAL = 10 ether;
+    uint256 public constant STARTING_ERC20_Balance = 100 ether;
     function setUp() external {
         deployer = new DeployDSC();
         (dsc, dscBrain, helperConfig) = deployer.run();
         (ethUsdPriceFeed,,weth, , ) = helperConfig.activeNetworkConfig();
+        ERC20Mock(weth).mint(USER,STARTING_ERC20_Balance);
     }
 
     ////////////////
@@ -31,4 +36,17 @@ contract DscBrainTest is Test {
         uint256 actualUsd = dscBrain.getValueInUSD(weth,ethAmount);
         assertEq(expectedUsd,actualUsd);
     }
+
+    ///////////////////////////////////////
+    // DEPOSIT COLLETRAL TEST ////////////
+    /////////////////////////////////////
+    function testRevertIfColletralIsZero() public {
+       vm.startPrank(USER);
+       ERC20Mock(weth).approve(address(dscBrain),AMOUNT_COLLETRAL);
+       vm.expectRevert(DSCBrain.DSCBrain__enteredAmountShouldBeMoreThanZero.selector);
+       dscBrain.depositColletral(weth,0);
+       vm.stopPrank();
+
+    }
+
 }

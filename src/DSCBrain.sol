@@ -53,14 +53,18 @@ contract DSCBrain is ReentrancyGuard {
     error DSCBrain__TransferOfTokenFailedFromUserToContract();
     error DSCBrain__HealthFactorIsBroken(uint256 healthFactor);
     error DSCBrain__MintFailed();
+    error DSCBrain__transferredFailed();
+    error DSCBrain__HealthFactorIsOk();
     ///////////////////////
     // StateVarialble ////
     //////////////////////
+
     uint256 private constant ADDRESS_FEED_PRECISION = 1e10;
     uint256 private constant PRECISION = 1e18;
-    uint256 private constant LIQUIDATION_THRESOLD = 50 ;
+    uint256 private constant LIQUIDATION_THRESOLD = 50;
     uint256 private constant LIQUIDATION_PRECISION = 100;
-    uint256 private constant MIN_HEALTH_FACTOR = 1;
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
+    uint256 private constant LIQUIDATION_BONUS = 10;
 
     mapping(address token => address priceFeed) private s_priceFeed; // token to priceFeed
     mapping(address user => mapping(address token => uint256 value)) private s_colletralDeposited;
@@ -68,12 +72,12 @@ contract DSCBrain is ReentrancyGuard {
     DecentralizedStableCoin private immutable i_dsc;
     address[] private s_colletralToken;
 
-
     /////////////////
     // Events //////
     ////////////////
 
     event tokenDepositedSuccessFully(address indexed tokenAddress, uint256 indexed amount);
+    event colletralReedemed(address indexed user, uint256 indexed amount, address indexed tokenColletralAddress);
     /////////////////
     // Modifiers ////
     ////////////////
@@ -105,15 +109,24 @@ contract DSCBrain is ReentrancyGuard {
         }
         i_dsc = DecentralizedStableCoin(dscAddress);
     }
-
-    function depositColletralAndMintDSC() external {}
     /**
-     * @param tokenColletral -- address of token that user will deposit
-     * @param amount -- The amount of olletral to deposit
+     * @param tokenColletral - address of token that user will deposit
+     * @param amount - The amount of olletral to deposit
+     * @param amountOfDSCtoMint -  Amount of token user to mint
+     * @notice Deposit and mint in one call
      */
 
+    function depositColletralAndMintDSC(address tokenColletral, uint256 amount, uint256 amountOfDSCtoMint) external {
+        depositColletral(tokenColletral, amount);
+        mintDSC(amountOfDSCtoMint);
+    }
+
+    /**
+     * @param tokenColletral -- address of token that user will deposit
+     * @param amount -- The amount of colletral to deposit
+     */
     function depositColletral(address tokenColletral, uint256 amount)
-        external
+        public
         moreThenZero(amount)
         isAllowedToken(tokenColletral)
         nonReentrant
@@ -130,19 +143,83 @@ contract DSCBrain is ReentrancyGuard {
      * @notice - user must have enough colletral to mint DSC token
      */
 
-    function mintDSC(uint256 amountOfDSCtoMint) external moreThenZero(amountOfDSCtoMint) {
+    function mintDSC(uint256 amountOfDSCtoMint) public moreThenZero(amountOfDSCtoMint) {
         s_amountOfDscMinted[msg.sender] += amountOfDSCtoMint;
         _revertIfHealthFactorIsBroken(msg.sender);
-        bool minted = i_dsc.mint(msg.sender,amountOfDSCtoMint);
-        if(!minted)
-        {
+        bool minted = i_dsc.mint(msg.sender, amountOfDSCtoMint);
+        if (!minted) {
             revert DSCBrain__MintFailed();
-
         }
     }
+    /**
+     *
+     * @param tokenColletralAddress -- address of token which user wants to redeem
+     * @param amountColletral -- amount of colletral user want to reedem
+     * @param amountToBurnDsc -- amount of DSC user want to burn
+     * This function burns DSC and reedem colletral in one transaction .
+     */
 
-    function redeemColletralForDSC() external {}
-    function liquidate() external {}
+    function redeemColletralForDsc(address tokenColletralAddress, uint256 amountColletral, uint256 amountToBurnDsc)
+        external
+    {
+        burnDsc(amountToBurnDsc);
+        redeemColletral(tokenColletralAddress, amountColletral);
+    }
+
+    function redeemColletral(address tokenColletralAddress, uint256 amountColletral)
+        public
+        moreThenZero(amountColletral)
+        nonReentrant
+    {
+        s_colletralDeposited[msg.sender][tokenColletralAddress] -= amountColletral;
+        emit colletralReedemed(msg.sender, amountColletral, tokenColletralAddress);
+        bool success = IERC20(tokenColletralAddress).transfer(msg.sender, amountColletral);
+        if (!success) {
+            revert DSCBrain__transferredFailed();
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    function burnDsc(uint256 amount) public moreThenZero(amount) {
+        s_amountOfDscMinted[msg.sender] -= amount;
+        bool success = i_dsc.transferFrom(msg.sender, address(this), amount);
+        if (!success) {
+            revert DSCBrain__transferredFailed();
+        }
+        i_dsc.burn(amount);
+    }
+    // If someone is almost uncolletralized, we will pay you to liquidate them
+
+    /**
+     * @param colletral - The erc20  colletral to liquidate
+     * @param user The user who has broken the health factor , The health factor should be MIN_HEALTH_FACTOR
+     * @param debtToCover The amount of DSC you want to burn to improve the user healh factor
+     * @notice - You can partially liquidate a user
+     * @notice - you will get a liquidation bonus for taking the user funds
+     * @notice - This unction working assumes the protocol will be roughly 200% overcolletralized in order for this to work
+     * @notice - A known bug would be if the protocol were 100% or less colletralized, then we wouldnt be able to incentive the liquidator
+     * For example - If the price of the colletral plummeted before anyone could be liquidated
+     */
+    function liquidate(address colletral, address user, uint256 debtToCover)
+        external
+        moreThenZero(debtToCover)
+        nonReentrant
+    {
+        // check the health factor of the user
+        uint256 startingUserHealthFactor = _healthFactor(user);
+        if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
+            revert DSCBrain__HealthFactorIsOk();
+        }
+        // we want to reduce their dsc debt
+        // And take their collateral
+        // 140 dollar eth , 100 dsc
+        // debt to cover -- 100 dollar
+        uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(colletral, debtToCover);
+        // give them 10% bonus
+        uint256 bonusColletral = (tokenAmountFromDebtCovered*LIQUIDATION_BONUS)/LIQUIDATION_PRECISION;
+        uint256 totalColletralToReedem = tokenAmountFromDebtCovered + bonusColletral;
+    }
+
     function getHealthFactor() external view {}
 
     /////////////////////////////////////////
@@ -158,8 +235,8 @@ contract DSCBrain is ReentrancyGuard {
         // total DSC minted
         // total colletral value
         (uint256 totalDscMinted, uint256 totalValueInUsd) = _getAccountInfoOfUser(user);
-        uint256 colletralAdjustedForTHresold = (totalValueInUsd * LIQUIDATION_THRESOLD ) /LIQUIDATION_PRECISION;
-        return (colletralAdjustedForTHresold * PRECISION)/totalDscMinted;
+        uint256 colletralAdjustedForTHresold = (totalValueInUsd * LIQUIDATION_THRESOLD) / LIQUIDATION_PRECISION;
+        return (colletralAdjustedForTHresold * PRECISION) / totalDscMinted;
     }
 
     function _getAccountInfoOfUser(address user)
@@ -169,22 +246,28 @@ contract DSCBrain is ReentrancyGuard {
     {
         totalDscMinted = s_amountOfDscMinted[user];
         totalValueInUsd = getAccountColletralValue(user);
-        
     }
 
     function _revertIfHealthFactorIsBroken(address user) internal view {
         // check do they have enough colletral
         // revert if they dont have
         uint256 userHealthFactor = _healthFactor(user);
-        if(userHealthFactor < MIN_HEALTH_FACTOR)
-        {
+        if (userHealthFactor < MIN_HEALTH_FACTOR) {
             revert DSCBrain__HealthFactorIsBroken(userHealthFactor);
         }
-    
     }
     //////////////////////////////////////////////
     /// Public and external view  function ///////
     //////////////////////////////////////////////
+
+    function getTokenAmountFromUsd(address colletral, uint256 usdAmountInWei) public view returns (uint256) {
+        // price of eth token
+        (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[colletral]).latestRoundData();
+        
+       uint256 priceWith18Decimal = uint256(price)*ADDRESS_FEED_PRECISION;
+        uint256 amountiInETH = (usdAmountInWei * PRECISION /priceWith18Decimal);
+        return amountiInETH;
+    }
 
     function getAccountColletralValue(address user) public view returns (uint256 totalColletralValueInUsd) {
         // loop through all the address -- get price of each and add it
@@ -192,11 +275,12 @@ contract DSCBrain is ReentrancyGuard {
             address token = s_colletralToken[i];
             uint256 amount = s_colletralDeposited[user][token];
             getValueInUSD(token, amount);
-            totalColletralValueInUsd+=getValueInUSD(token,amount);
+            totalColletralValueInUsd += getValueInUSD(token, amount);
         }
     }
+
     function getValueInUSD(address token, uint256 amount) public view returns (uint256) {
         (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[token]).latestRoundData();
-          return (uint256(price) * ADDRESS_FEED_PRECISION) * amount / PRECISION;
+        return (uint256(price) * ADDRESS_FEED_PRECISION) * amount / PRECISION;
     }
 }

@@ -55,6 +55,8 @@ contract DSCBrain is ReentrancyGuard {
     error DSCBrain__MintFailed();
     error DSCBrain__transferredFailed();
     error DSCBrain__HealthFactorIsOk();
+    error DSCBrain__HealthFactorNotImproved();
+   
     ///////////////////////
     // StateVarialble ////
     //////////////////////
@@ -77,7 +79,9 @@ contract DSCBrain is ReentrancyGuard {
     ////////////////
 
     event tokenDepositedSuccessFully(address indexed tokenAddress, uint256 indexed amount);
-    event colletralReedemed(address indexed user, uint256 indexed amount, address indexed tokenColletralAddress);
+    event colletralReedemed(
+        address indexed redeemedFrom, address indexed redeemedTo, address indexed tokenColletralAddress, uint256 amount
+    );
     /////////////////
     // Modifiers ////
     ////////////////
@@ -171,22 +175,12 @@ contract DSCBrain is ReentrancyGuard {
         moreThenZero(amountColletral)
         nonReentrant
     {
-        s_colletralDeposited[msg.sender][tokenColletralAddress] -= amountColletral;
-        emit colletralReedemed(msg.sender, amountColletral, tokenColletralAddress);
-        bool success = IERC20(tokenColletralAddress).transfer(msg.sender, amountColletral);
-        if (!success) {
-            revert DSCBrain__transferredFailed();
-        }
+        _redeemColletral(tokenColletralAddress, amountColletral, address(this), msg.sender);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
     function burnDsc(uint256 amount) public moreThenZero(amount) {
-        s_amountOfDscMinted[msg.sender] -= amount;
-        bool success = i_dsc.transferFrom(msg.sender, address(this), amount);
-        if (!success) {
-            revert DSCBrain__transferredFailed();
-        }
-        i_dsc.burn(amount);
+        _burnDsc(amount, msg.sender, msg.sender);
     }
     // If someone is almost uncolletralized, we will pay you to liquidate them
 
@@ -216,21 +210,42 @@ contract DSCBrain is ReentrancyGuard {
         // debt to cover -- 100 dollar
         uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(colletral, debtToCover);
         // give them 10% bonus
-        uint256 bonusColletral = (tokenAmountFromDebtCovered*LIQUIDATION_BONUS)/LIQUIDATION_PRECISION;
+        uint256 bonusColletral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
         uint256 totalColletralToReedem = tokenAmountFromDebtCovered + bonusColletral;
+        _redeemColletral(colletral, totalColletralToReedem, user, msg.sender);
+        _burnDsc(debtToCover , user , msg.sender);
+
+        uint256 endingUserHealthFactor = _healthFactor(user);
+         if (startingUserHealthFactor <= endingUserHealthFactor) {
+            revert DSCBrain__HealthFactorNotImproved();
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
+
     }
+    
 
     function getHealthFactor() external view {}
 
     /////////////////////////////////////////
     /// Internal and Private function ///////
     /////////////////////////////////////////
-
+    function _redeemColletral(address tokenColletralAddress, uint256 amountColletral, address from, address to)
+        private
+    {
+        s_colletralDeposited[from][tokenColletralAddress] -= amountColletral;
+        emit colletralReedemed(from, to, tokenColletralAddress, amountColletral);
+        bool success = IERC20(tokenColletralAddress).transfer(to, amountColletral);
+        if (!success) {
+            revert DSCBrain__transferredFailed();
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
     /**
      * @param user - user address
      * Returns how lose to liquidation a user is
      * If a user goes below 1, they can get liquidate
      */
+
     function _healthFactor(address user) private view returns (uint256) {
         // total DSC minted
         // total colletral value
@@ -259,13 +274,30 @@ contract DSCBrain is ReentrancyGuard {
     //////////////////////////////////////////////
     /// Public and external view  function ///////
     //////////////////////////////////////////////
+    /**
+     *
+     * @param amountOfDscToBurn The amount of DSC to Burn
+     * @param onBehalfOf -
+     * @param dscFrom  -
+     *
+     * @dev Low-Level internal function, do not call unless the function calling it is checking for health factor being brken
+     */
+
+    function _burnDsc(uint256 amountOfDscToBurn, address onBehalfOf, address dscFrom) private moreThenZero(amountOfDscToBurn) {
+        s_amountOfDscMinted[onBehalfOf] -= amountOfDscToBurn;
+        bool success = i_dsc.transferFrom(dscFrom, address(this), amountOfDscToBurn);
+        if (!success) {
+            revert DSCBrain__transferredFailed();
+        }
+        i_dsc.burn(amountOfDscToBurn);
+    }
 
     function getTokenAmountFromUsd(address colletral, uint256 usdAmountInWei) public view returns (uint256) {
         // price of eth token
         (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[colletral]).latestRoundData();
-        
-       uint256 priceWith18Decimal = uint256(price)*ADDRESS_FEED_PRECISION;
-        uint256 amountiInETH = (usdAmountInWei * PRECISION /priceWith18Decimal);
+
+        uint256 priceWith18Decimal = uint256(price) * ADDRESS_FEED_PRECISION;
+        uint256 amountiInETH = (usdAmountInWei * PRECISION / priceWith18Decimal);
         return amountiInETH;
     }
 

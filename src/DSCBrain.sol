@@ -315,4 +315,8 @@ contract DSCBrain is ReentrancyGuard {
         (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[token]).latestRoundData();
         return (uint256(price) * ADDRESS_FEED_PRECISION) * amount / PRECISION;
     }
+
+    function getColletralDeposited(address user , address token) external view returns (uint256) {
+         return s_colletralDeposited[user][token];
+    }
 }

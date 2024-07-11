@@ -56,7 +56,7 @@ contract DSCBrain is ReentrancyGuard {
     error DSCBrain__transferredFailed();
     error DSCBrain__HealthFactorIsOk();
     error DSCBrain__HealthFactorNotImproved();
-   
+
     ///////////////////////
     // StateVarialble ////
     //////////////////////
@@ -213,18 +213,14 @@ contract DSCBrain is ReentrancyGuard {
         uint256 bonusColletral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
         uint256 totalColletralToReedem = tokenAmountFromDebtCovered + bonusColletral;
         _redeemColletral(colletral, totalColletralToReedem, user, msg.sender);
-        _burnDsc(debtToCover , user , msg.sender);
+        _burnDsc(debtToCover, user, msg.sender);
 
         uint256 endingUserHealthFactor = _healthFactor(user);
-         if (startingUserHealthFactor <= endingUserHealthFactor) {
+        if (startingUserHealthFactor <= endingUserHealthFactor) {
             revert DSCBrain__HealthFactorNotImproved();
         }
         _revertIfHealthFactorIsBroken(msg.sender);
-
     }
-    
-
-    function getHealthFactor() external view {}
 
     /////////////////////////////////////////
     /// Internal and Private function ///////
@@ -246,11 +242,18 @@ contract DSCBrain is ReentrancyGuard {
      * If a user goes below 1, they can get liquidate
      */
 
-    function _healthFactor(address user) private view returns (uint256) {
-        // total DSC minted
-        // total colletral value
+    function _healthFactor(address user /*private*/ ) public view returns (uint256) {
         (uint256 totalDscMinted, uint256 totalValueInUsd) = _getAccountInfoOfUser(user);
-        uint256 colletralAdjustedForTHresold = (totalValueInUsd * LIQUIDATION_THRESOLD) / LIQUIDATION_PRECISION;
+        return _calculateHealthFactor(totalDscMinted, totalValueInUsd);
+    }
+
+    function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (totalDscMinted == 0) return type(uint256).max;
+        uint256 colletralAdjustedForTHresold = (collateralValueInUsd * LIQUIDATION_THRESOLD) / LIQUIDATION_PRECISION;
         return (colletralAdjustedForTHresold * PRECISION) / totalDscMinted;
     }
 
@@ -283,7 +286,10 @@ contract DSCBrain is ReentrancyGuard {
      * @dev Low-Level internal function, do not call unless the function calling it is checking for health factor being brken
      */
 
-    function _burnDsc(uint256 amountOfDscToBurn, address onBehalfOf, address dscFrom) private moreThenZero(amountOfDscToBurn) {
+    function _burnDsc(uint256 amountOfDscToBurn, address onBehalfOf, address dscFrom)
+        private
+        moreThenZero(amountOfDscToBurn)
+    {
         s_amountOfDscMinted[onBehalfOf] -= amountOfDscToBurn;
         bool success = i_dsc.transferFrom(dscFrom, address(this), amountOfDscToBurn);
         if (!success) {
@@ -311,18 +317,45 @@ contract DSCBrain is ReentrancyGuard {
         }
     }
 
+    ////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+    // External & Public View & Pure Functions
+    ////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+    function calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
+        external
+        pure
+        returns (uint256)
+    {
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
+    }
+
     function getValueInUSD(address token, uint256 amount) public view returns (uint256) {
         (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[token]).latestRoundData();
         return (uint256(price) * ADDRESS_FEED_PRECISION) * amount / PRECISION;
     }
 
-    function getColletralDeposited(address user , address token) external view returns (uint256) {
-         return s_colletralDeposited[user][token];
+    function getColletralDeposited(address user, address token) external view returns (uint256) {
+        return s_colletralDeposited[user][token];
     }
 
-    function get_getAccountInfoOfUser(address user) external view returns(uint256 totalDscMinted, uint256 totalValueInUsd)
+    function get_getAccountInfoOfUser(address user)
+        external
+        view
+        returns (uint256 totalDscMinted, uint256 totalValueInUsd)
     {
-      (totalDscMinted,totalValueInUsd)=_getAccountInfoOfUser(user);
+        (totalDscMinted, totalValueInUsd) = _getAccountInfoOfUser(user);
+    }
 
+    function getHealthFactor(address user) external view returns (uint256 healthFactor) {
+        healthFactor = _healthFactor(user);
+    }
+    function getAddressFeedPrecision() external pure returns(uint256)
+    {
+        return ADDRESS_FEED_PRECISION;
+    }
+    function getPrecision() external pure returns(uint256)
+    {
+        return PRECISION;
     }
 }

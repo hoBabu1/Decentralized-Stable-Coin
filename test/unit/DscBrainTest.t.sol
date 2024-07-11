@@ -9,6 +9,7 @@ import {DeployDSC} from "script/deployDSC.s.sol";
 import {HelperConfig} from "script/HelperConfig.s.sol";
 import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import {MockFailedTransferFrom} from "test/unit/mocks/mockFailedTransferFrom.sol";
+import {MockMintingFail} from "test/unit/mocks/MockFailedMint.sol";
 
 contract DscBrainTest is Test {
     DeployDSC deployer;
@@ -45,6 +46,15 @@ contract DscBrainTest is Test {
         _;
     }
 
+    modifier depositColletralAndMintDSC(){
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dscBrain), AMOUNT_COLLETRAL);
+        dscBrain.depositColletralAndMintDSC(weth , AMOUNT_COLLETRAL , 5e18);
+        vm.stopPrank();
+        _;
+
+    }
+
     ////////////////////////
     // Constructor Test ////
     ///////////////////////
@@ -63,7 +73,7 @@ contract DscBrainTest is Test {
     // PriceFeed ////
     ////////////////
     function testgetValueUsd() public view {
-        uint256 ethAmount = 15e18;
+        uint256 ethAmount = 15 ether;
         uint256 expectedUsd = 30000e18;
         uint256 actualUsd = dscBrain.getValueInUSD(weth, ethAmount);
         assertEq(expectedUsd, actualUsd);
@@ -154,4 +164,63 @@ contract DscBrainTest is Test {
         dscBrain.mintDSC(0);
         vm.stopPrank();
     }
+
+    function testHealthFactorMaxIfDscMintedIsZero() public depositColletral {
+        vm.startPrank(USER);
+        uint256 healthfactor = dscBrain.getHealthFactor(USER);
+        assertEq(type(uint256).max, healthfactor);
+        vm.stopPrank();
+    }
+
+    function testUserCanMintDSC() public depositColletral {
+        vm.startPrank(USER);
+        uint256 amountOfDscToMint = 5;
+        dscBrain.mintDSC(amountOfDscToMint);
+        (uint256 totalDscMinted,) = dscBrain.get_getAccountInfoOfUser(USER);
+        assertEq(totalDscMinted, amountOfDscToMint);
+        vm.stopPrank();
+    }
+
+    function testRevertIfHealthFactorIsBroken() public depositColletral {
+        /**
+         * Get the total amount value of User in USD .
+         * As per the logic in DSCEngine -- system need to be 200% overcolletralized.
+         * It means that we can mint only 50% of total colletral.
+         * So i am getting the total value of colletral of a user in USD and dividing it by 2 --
+         * It will give me the total value of of which i can mint token .
+         */
+        vm.startPrank(USER);
+        (uint256 totalDscMinted, uint256 totalValueInUsd) = dscBrain.get_getAccountInfoOfUser(USER);
+        // As of now user havent minted any Token.
+        uint256 amountOfDscUserCanMint = totalValueInUsd / 2;
+        // If i increase "amountOfDscUserCanMint" , User should not be able to mint and revert
+        uint256 amountOfDsc = amountOfDscUserCanMint + 1;
+        uint256 expectedHealthFactor = dscBrain.calculateHealthFactor(amountOfDsc, totalValueInUsd);
+        vm.expectRevert(abi.encodeWithSelector(DSCBrain.DSCBrain__HealthFactorIsBroken.selector, expectedHealthFactor));
+        dscBrain.mintDSC(amountOfDsc);
+        vm.stopPrank();
+    }
+
+    function testMintFail() public {
+        MockMintingFail mockCoin = new MockMintingFail();
+        tokenAddress.push(weth);
+        priceFeedAddress.push(wethUsdPriceFeed);
+        address owner = msg.sender;
+        vm.prank(owner);
+        DSCBrain brainMock = new DSCBrain(tokenAddress, priceFeedAddress, address(mockCoin));
+        mockCoin.transferOwnership(address(brainMock));
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(brainMock), AMOUNT_COLLETRAL);
+        vm.expectRevert(DSCBrain.DSCBrain__MintFailed.selector);
+        brainMock.depositColletralAndMintDSC(weth, AMOUNT_COLLETRAL, 1e18);
+        vm.stopPrank();
+    }
+
+    function testdepositColletralAndMintDSC() public depositColletralAndMintDSC() {
+        (uint256 totalDscMinted, uint256 totalValueInUsd) = dscBrain.get_getAccountInfoOfUser(USER);
+        console.log(totalDscMinted);
+         
+
+    }
+    
 }

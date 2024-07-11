@@ -319,4 +319,10 @@ contract DSCBrain is ReentrancyGuard {
     function getColletralDeposited(address user , address token) external view returns (uint256) {
          return s_colletralDeposited[user][token];
     }
+
+    function get_getAccountInfoOfUser(address user) external view returns(uint256 totalDscMinted, uint256 totalValueInUsd)
+    {
+      (totalDscMinted,totalValueInUsd)=_getAccountInfoOfUser(user);
+
+    }
 }

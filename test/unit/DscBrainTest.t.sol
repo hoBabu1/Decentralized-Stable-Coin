@@ -11,6 +11,8 @@ import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20M
 import {MockFailedTransferFrom} from "test/unit/mocks/mockFailedTransferFrom.sol";
 import {MockMintingFail} from "test/unit/mocks/MockFailedMint.sol";
 import {MockTransferFailReedeem} from "test/unit/mocks/MockTransferFailReedeem.sol";
+import {MockV3Aggregator} from "test/unit/mocks/mockV3Aggregator.sol";
+
 contract DscBrainTest is Test {
     DeployDSC deployer;
     DecentralizedStableCoin dsc;
@@ -23,7 +25,11 @@ contract DscBrainTest is Test {
     address public newAddress = makeAddr("Namaste");
     address public USER = makeAddr("hoBabu");
     uint256 public constant AMOUNT_COLLETRAL = 10 ether;
-    uint256 public constant STARTING_ERC20_Balance = 100 ether;
+    uint256 public constant STARTING_ERC20_Balance = 10 ether;
+
+     // Liquidation
+    address public liquidator = makeAddr("liquidator");
+    uint256 public collateralToCover = 200 ether;
 
     function setUp() external {
         deployer = new DeployDSC();
@@ -50,7 +56,7 @@ contract DscBrainTest is Test {
     }
 
     modifier depositColletralAndMintDSC() {
-        uint256 amountToMint= 10e18;
+        uint256 amountToMint= 100e18;
         vm.startPrank(USER);
         ERC20Mock(weth).approve(address(dscBrain), AMOUNT_COLLETRAL);
         dscBrain.depositColletralAndMintDSC(weth, AMOUNT_COLLETRAL, amountToMint);
@@ -126,6 +132,7 @@ contract DscBrainTest is Test {
     function testRevertIfTransactionIsFail() public {
         vm.startPrank(USER);
         MockFailedTransferFrom mockCoin = new MockFailedTransferFrom();
+       
         tokenAddress.push(address(mockCoin));
         priceFeedAddress.push(wethUsdPriceFeed);
         DSCBrain brainMock = new DSCBrain(tokenAddress, priceFeedAddress, address(mockCoin));
@@ -221,7 +228,7 @@ contract DscBrainTest is Test {
 
     function testCanMintDsc() public depositColletralAndMintDSC {
         (uint256 totalDscMinted, ) = dscBrain.get_getAccountInfoOfUser(USER);
-        assertEq(totalDscMinted, 10e18);
+        assertEq(totalDscMinted, 100e18);
     }
 
     ////////////////////////////////////////////
@@ -238,7 +245,7 @@ contract DscBrainTest is Test {
 
      function testBurnDscSuccessfully() public depositColletralAndMintDSC()
      {
-        uint256 userTotalDscAfterBurning = 9e18;
+        uint256 userTotalDscAfterBurning = 99e18;
         vm.startPrank(USER);
         dsc.approve(address(dscBrain),1e18 );
         dscBrain.burnDsc(1e18);
@@ -291,7 +298,97 @@ contract DscBrainTest is Test {
         vm.stopPrank();
      }
 
+     function testTransferOfRedeemingColletralFails() public {
+        address owner = msg.sender ;
+        vm.prank(owner);
+        MockTransferFailReedeem mockCoin = new MockTransferFailReedeem();
+        mockCoin.mint(USER,AMOUNT_COLLETRAL);
+        
+        tokenAddress.push(address(mockCoin));
+        priceFeedAddress.push(wethUsdPriceFeed);
+        
+        vm.prank(owner);
+        DSCBrain brainMock = new DSCBrain(tokenAddress, priceFeedAddress, address(mockCoin));
+       
+        vm.prank(owner); 
+        mockCoin.transferOwnership(address(brainMock));
+        vm.startPrank(USER);
+        MockTransferFailReedeem(mockCoin).approve(address(brainMock),AMOUNT_COLLETRAL);
+        brainMock.depositColletral(address(mockCoin),AMOUNT_COLLETRAL);
 
+        vm.expectRevert(DSCBrain.DSCBrain__transferredFailed.selector);
+        brainMock.redeemColletral(address(mockCoin),AMOUNT_COLLETRAL);
+        vm.stopPrank();
+      }
+      //////////////////////////////////
+      //// Redeem Colletral For Dsc////
+      /////////////////////////////////
 
+      function testRedeemMoreThanZero() public depositColletralAndMintDSC()
+      {
+        vm.startPrank(USER);
+        dsc.approve(address(dscBrain),AMOUNT_COLLETRAL);
+        vm.expectRevert(DSCBrain.DSCBrain__enteredAmountShouldBeMoreThanZero.selector);
+        dscBrain.redeemColletralForDsc(weth,AMOUNT_COLLETRAL,0);
+        vm.stopPrank();
 
+      }
+      function testRedeemColletralForDsc() public depositColletralAndMintDSC()
+      {
+        vm.startPrank(USER);
+        dsc.approve(address(dscBrain),100e18);
+        dscBrain.redeemColletralForDsc(weth,AMOUNT_COLLETRAL,100e18);
+        (uint256 totalDscMinted, ) = dscBrain.get_getAccountInfoOfUser(USER);
+        assertEq(totalDscMinted,0);
+        vm.stopPrank();
+      } 
+
+      ////////////////////////////////////////
+      ////// Health Factor //////////////////
+      ///////////////////////////////////////
+
+      function testHealthFactor() public depositColletralAndMintDSC()
+      {
+        uint256 expectedHealthFactor = 100e18;
+        uint256 orginalHealthFactor = dscBrain.getHealthFactor(USER);
+        assertEq(expectedHealthFactor,orginalHealthFactor);
+      }
+
+      //////////////////////////////////
+      // Liquidation Test //////////////
+      //////////////////////////////////
+
+      function testDebtCoverShouldBeMoreThanZero() public depositColletralAndMintDSC()
+      {
+        vm.startPrank(USER);
+        vm.expectRevert(DSCBrain.DSCBrain__enteredAmountShouldBeMoreThanZero.selector);
+        dscBrain.liquidate(weth, USER , 0);
+        vm.stopPrank();
+      }
+      function testRevertIfHealthFactorIsOk() public depositColletralAndMintDSC()
+      {
+        uint256 debtToCover = 1 ;
+        vm.startPrank(USER);
+        vm.expectRevert(DSCBrain.DSCBrain__HealthFactorIsOk.selector);
+        dscBrain.liquidate(weth, USER , debtToCover);
+        vm.stopPrank();
+      }
+
+      function testLiquidation() public depositColletralAndMintDSC(){
+          //uint256 beforeHealthFactor =  dscBrain.getHealthFactor(USER);
+         // console.log("Before",beforeHealthFactor);
+          int256 ethUsdUpdatedPrice = 10e8;
+          MockV3Aggregator(wethUsdPriceFeed).updateAnswer(ethUsdUpdatedPrice);
+          //uint256 afterHealthFactor =  dscBrain.getHealthFactor(USER);
+          //console.log("After",afterHealthFactor);
+
+          ERC20Mock(weth).mint(liquidator,collateralToCover);
+
+          vm.startPrank(liquidator);
+          ERC20Mock(weth).approve(address(dscBrain),collateralToCover);
+          dscBrain.depositColletralAndMintDSC(weth,collateralToCover,10e18);
+          dsc.approve(address(dscBrain),10e18);
+          dscBrain.liquidate(weth,USER,10e18);
+          vm.stopPrank();
+      }
 }

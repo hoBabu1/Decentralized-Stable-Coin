@@ -1,57 +1,29 @@
-
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/**
- * Why ERC20Burnable ?
- * It has burn function function , it will help to maintain the pegged price
- */
 import {ERC20Burnable, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-/**
- * @title Decentralized Stable Coin
- * @author hoBabu aka Aman kumar
- * Colletral : Exogenous
- * Minting: Algorithmic
- * Relative stability: pegged to USD
- */
 
 contract MockTransferFailReedeem is ERC20Burnable, Ownable {
-    /**
-     * Errors
-     */
-    error DecentralizedStableCoin__buriningAmountMustBeGreaterThenZero();
-    error DecentralizedStableCoin__burningAmountExceedsBalance();
-    error DecentralizedStableCoin__youCannotMintAtZeroAddress();
-    error DecentralizedStableCoin__MintingAmountShouldBeGreaterThanZero();
+    error DecentralizedStableCoin__AmountMustBeMoreThanZero();
+    error DecentralizedStableCoin__BurnAmountExceedsBalance();
+    error DecentralizedStableCoin__NotZeroAddress();
 
-    constructor() ERC20("hoBabu", "hB") Ownable(msg.sender) {}
+    constructor() ERC20("DecentralizedStableCoin", "DSC") Ownable(msg.sender) {}
 
-    function burn(uint256 amount) public override onlyOwner {
+    function burn(uint256 _amount) public override onlyOwner {
         uint256 balance = balanceOf(msg.sender);
-        if (amount <= 0) {
-            revert DecentralizedStableCoin__buriningAmountMustBeGreaterThenZero();
+        if (_amount <= 0) {
+            revert DecentralizedStableCoin__AmountMustBeMoreThanZero();
         }
-        if (amount > balance) {
-            revert DecentralizedStableCoin__burningAmountExceedsBalance();
+        if (balance < _amount) {
+            revert DecentralizedStableCoin__BurnAmountExceedsBalance();
         }
-        /**
-         * this keyword (super) says that use the function as it was before after doin this check
-         * use the brun function from parent class
-         */
-        super.burn(amount);
+        super.burn(_amount);
     }
 
-    function mint(address to, uint256 value) external onlyOwner returns (bool) {
-        if (to == address(0)) {
-            revert DecentralizedStableCoin__youCannotMintAtZeroAddress();
-        }
-        if (value <= 0) {
-            revert DecentralizedStableCoin__MintingAmountShouldBeGreaterThanZero();
-        }
-        // we are not overrinding so we wont use super keyword
-        _mint(to, value);
-
-        return true;
+    function mint(address account, uint256 amount) public {
+        _mint(account, amount);
     }
 
     function transfer(address, /*recipient*/ uint256 /*amount*/ ) public pure override returns (bool) {

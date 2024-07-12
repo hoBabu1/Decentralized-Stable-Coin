@@ -115,7 +115,7 @@ contract DSCBrain is ReentrancyGuard {
     }
     /**
      * @param tokenColletral - address of token that user will deposit
-     * @param amount - The amount of olletral to deposit
+     * @param amount - The amount of colletral to deposit
      * @param amountOfDSCtoMint -  Amount of token user to mint
      * @notice Deposit and mint in one call
      */
@@ -357,6 +357,5 @@ contract DSCBrain is ReentrancyGuard {
     function getPrecision() external pure returns(uint256)
     {
         return PRECISION;
-    }
-     
+    } 
 }

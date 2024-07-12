@@ -175,7 +175,7 @@ contract DSCBrain is ReentrancyGuard {
         moreThenZero(amountColletral)
         nonReentrant
     {
-        _redeemColletral(tokenColletralAddress, amountColletral, address(this), msg.sender);
+        _redeemColletral(tokenColletralAddress, amountColletral, msg.sender, msg.sender);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -358,4 +358,5 @@ contract DSCBrain is ReentrancyGuard {
     {
         return PRECISION;
     }
+     
 }

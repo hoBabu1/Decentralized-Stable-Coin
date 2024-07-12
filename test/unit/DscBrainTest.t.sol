@@ -10,7 +10,7 @@ import {HelperConfig} from "script/HelperConfig.s.sol";
 import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import {MockFailedTransferFrom} from "test/unit/mocks/mockFailedTransferFrom.sol";
 import {MockMintingFail} from "test/unit/mocks/MockFailedMint.sol";
-
+import {MockTransferFailReedeem} from "test/unit/mocks/MockTransferFailReedeem.sol";
 contract DscBrainTest is Test {
     DeployDSC deployer;
     DecentralizedStableCoin dsc;
@@ -34,6 +34,9 @@ contract DscBrainTest is Test {
     /* EVENT */
 
     event tokenDepositedSuccessFully(address indexed tokenAddress, uint256 indexed amount);
+    event colletralReedemed(
+        address indexed redeemedFrom, address indexed redeemedTo, address indexed tokenColletralAddress, uint256 amount
+    );
 
     ////////////////////
     // Modifier ////////
@@ -46,13 +49,13 @@ contract DscBrainTest is Test {
         _;
     }
 
-    modifier depositColletralAndMintDSC(){
+    modifier depositColletralAndMintDSC() {
+        uint256 amountToMint= 10e18;
         vm.startPrank(USER);
         ERC20Mock(weth).approve(address(dscBrain), AMOUNT_COLLETRAL);
-        dscBrain.depositColletralAndMintDSC(weth , AMOUNT_COLLETRAL , 5e18);
+        dscBrain.depositColletralAndMintDSC(weth, AMOUNT_COLLETRAL, amountToMint);
         vm.stopPrank();
         _;
-
     }
 
     ////////////////////////
@@ -190,7 +193,7 @@ contract DscBrainTest is Test {
          * It will give me the total value of of which i can mint token .
          */
         vm.startPrank(USER);
-        (uint256 totalDscMinted, uint256 totalValueInUsd) = dscBrain.get_getAccountInfoOfUser(USER);
+        (, uint256 totalValueInUsd) = dscBrain.get_getAccountInfoOfUser(USER);
         // As of now user havent minted any Token.
         uint256 amountOfDscUserCanMint = totalValueInUsd / 2;
         // If i increase "amountOfDscUserCanMint" , User should not be able to mint and revert
@@ -216,11 +219,79 @@ contract DscBrainTest is Test {
         vm.stopPrank();
     }
 
-    function testdepositColletralAndMintDSC() public depositColletralAndMintDSC() {
-        (uint256 totalDscMinted, uint256 totalValueInUsd) = dscBrain.get_getAccountInfoOfUser(USER);
-        console.log(totalDscMinted);
-         
-
+    function testCanMintDsc() public depositColletralAndMintDSC {
+        (uint256 totalDscMinted, ) = dscBrain.get_getAccountInfoOfUser(USER);
+        assertEq(totalDscMinted, 10e18);
     }
-    
+
+    ////////////////////////////////////////////
+    ////// BURN DSC ///////////////////////////
+    //////////////////////////////////////////
+     
+     function test_Amount_Of_DscToBurn_GreaterThanZero() public depositColletralAndMintDSC()
+     {
+        vm.startPrank(USER);
+        vm.expectRevert(DSCBrain.DSCBrain__enteredAmountShouldBeMoreThanZero.selector);
+        dscBrain.burnDsc(0);
+        vm.stopPrank();
+     }
+
+     function testBurnDscSuccessfully() public depositColletralAndMintDSC()
+     {
+        uint256 userTotalDscAfterBurning = 9e18;
+        vm.startPrank(USER);
+        dsc.approve(address(dscBrain),1e18 );
+        dscBrain.burnDsc(1e18);
+        (uint256 totalDscMinted, ) = dscBrain.get_getAccountInfoOfUser(USER);
+        assertEq(totalDscMinted,userTotalDscAfterBurning);
+        vm.stopPrank();
+     }
+
+     function testCantBurnMoreThanUserHas() public depositColletralAndMintDSC(){
+        vm.startPrank(USER);
+        dsc.approve(address(dscBrain),10e18 );
+        vm.expectRevert();
+        dscBrain.burnDsc(11e18);
+        vm.stopPrank();
+     }
+
+     ////////////////////////////
+     // Reedem Colletral Test////
+     ////////////////////////////
+     function testRedeemColletralGreaterThanZero() public depositColletralAndMintDSC(){
+        uint256 reedeemColletralAmount = 5 ether;
+        vm.startPrank(USER);
+        dsc.approve(address(dscBrain), reedeemColletralAmount);
+        vm.expectRevert(DSCBrain.DSCBrain__enteredAmountShouldBeMoreThanZero.selector);
+        dscBrain.redeemColletral(weth,0);
+        vm.stopPrank();
+     }
+
+     function testUserCanReedeemColletral() public depositColletral(){
+        uint256 reedeemColletralAmount = 5 ether;
+        vm.startPrank(USER);
+        dscBrain.redeemColletral(weth,reedeemColletralAmount);
+        vm.stopPrank();
+     }
+
+     function testCannotReedemColletralMoreThanUserHave() public depositColletral(){
+        uint256 reedeemColletralAmount = AMOUNT_COLLETRAL+1;
+        vm.startPrank(USER);
+        vm.expectRevert();
+        dscBrain.redeemColletral(weth,reedeemColletralAmount);
+        vm.stopPrank();
+     }
+
+     function testEmitEventOnReedeemingColletral() public depositColletral()
+     {
+        vm.startPrank(USER);
+        vm.expectEmit(true, true , true , true , address(dscBrain));
+        emit DSCBrain.colletralReedemed(USER,USER,weth,AMOUNT_COLLETRAL);
+        dscBrain.redeemColletral(weth,AMOUNT_COLLETRAL);
+        vm.stopPrank();
+     }
+
+
+
+
 }

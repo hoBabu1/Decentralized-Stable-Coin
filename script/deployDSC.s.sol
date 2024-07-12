@@ -16,7 +16,7 @@ contract DeployDSC is Script {
         address wbtcUsdPriceFeed,
         address weth,
         address wbtc,
-        uint256 deployerKey) = helperConfig.activeNetworkConfig();
+        ) = helperConfig.activeNetworkConfig();
         tokenAddress = [weth,wbtc];
         tokenToPriceFeedAddress = [wethUsdPriceFeed,wbtcUsdPriceFeed];
 

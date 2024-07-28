@@ -358,4 +358,8 @@ contract DSCBrain is ReentrancyGuard {
     {
         return PRECISION;
     } 
+    function getColletralToken() external view returns(address[] memory)
+    {
+        return s_colletralToken;
+    }
 }

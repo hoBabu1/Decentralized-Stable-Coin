@@ -381,14 +381,16 @@ contract DscBrainTest is Test {
           MockV3Aggregator(wethUsdPriceFeed).updateAnswer(ethUsdUpdatedPrice);
           //uint256 afterHealthFactor =  dscBrain.getHealthFactor(USER);
           //console.log("After",afterHealthFactor);
-
           ERC20Mock(weth).mint(liquidator,collateralToCover);
-
           vm.startPrank(liquidator);
           ERC20Mock(weth).approve(address(dscBrain),collateralToCover);
           dscBrain.depositColletralAndMintDSC(weth,collateralToCover,10e18);
           dsc.approve(address(dscBrain),10e18);
+          (uint256 totalDscMinted, uint256 totalValueInUsd) = dscBrain.get_getAccountInfoOfUser(liquidator);
+          console.log("Liquidator ",totalValueInUsd);
           dscBrain.liquidate(weth,USER,10e18);
           vm.stopPrank();
+          (uint256 totalDscMinted1, uint256 totalValueInUsd1) = dscBrain.get_getAccountInfoOfUser(liquidator);
+          console.log("Liquidator ",totalValueInUsd1);
       }
 }

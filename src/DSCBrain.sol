@@ -27,6 +27,7 @@ import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/utils/Reentr
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from
     "lib/chainlink-brownie-contracts/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {Oraclelib} from "src/libraries/oracleLib.sol";
 /**
  * @title DSCBrain
  * @author Aman Kumar
@@ -56,6 +57,12 @@ contract DSCBrain is ReentrancyGuard {
     error DSCBrain__transferredFailed();
     error DSCBrain__HealthFactorIsOk();
     error DSCBrain__HealthFactorNotImproved();
+
+    ////////////////////
+    // TYPE ///////////
+    ///////////////////
+
+    using Oraclelib for AggregatorV3Interface;
 
     ///////////////////////
     // StateVarialble ////
@@ -300,7 +307,7 @@ contract DSCBrain is ReentrancyGuard {
 
     function getTokenAmountFromUsd(address colletral, uint256 usdAmountInWei) public view returns (uint256) {
         // price of eth token
-        (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[colletral]).latestRoundData();
+        (, int256 price,,,) = AggregatorV3Interface(s_priceFeed[colletral]).staleCheckLatestRoundData();
 
         uint256 priceWith18Decimal = uint256(price) * ADDRESS_FEED_PRECISION;
         uint256 amountiInETH = (usdAmountInWei * PRECISION / priceWith18Decimal);
@@ -361,5 +368,8 @@ contract DSCBrain is ReentrancyGuard {
     function getColletralToken() external view returns(address[] memory)
     {
         return s_colletralToken;
+    }
+     function getCollateralTokenPriceFeed(address token) external view returns (address) {
+        return s_priceFeed[token];
     }
 }

@@ -9,6 +9,7 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {DecentralizedStableCoin} from "src/decentralizedStableCoin.sol";
 import {DSCBrain} from "src/DSCBrain.sol";
 import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
+import {MockV3Aggregator} from "test/unit/mocks/mockV3Aggregator.sol";
 
 contract Handler is Test {
     DecentralizedStableCoin dsc;
@@ -19,12 +20,14 @@ contract Handler is Test {
     uint256 public constant MAX_DEPOSIT_SIZE = type(uint96).max;
 
     address [] public userWithColletralDeposited;
+    MockV3Aggregator public ethUsdPriceFeed;
     constructor(DecentralizedStableCoin _dsc, DSCBrain _dscBrain) {
         dsc = _dsc;
         dscBrain = _dscBrain;
         address[] memory colletralToken = dscBrain.getColletralToken();
         wbtc = ERC20Mock(colletralToken[1]);
         weth = ERC20Mock(colletralToken[0]);
+        ethUsdPriceFeed = MockV3Aggregator(dscBrain.getCollateralTokenPriceFeed(address(weth)));
     }
 
     // reedem colletral ->  call this when u have colletral  - for this we need to deposit colletral
@@ -63,9 +66,6 @@ contract Handler is Test {
         vm.stopPrank();
         userWithColletralDeposited.push(msg.sender);
     }
-
-   
-
     function redeemColletral(uint256 colletralSeed,uint256 amountColletral) public 
     {
         ERC20Mock colletral = _getColletralFromSeed(colletralSeed);
@@ -77,6 +77,14 @@ contract Handler is Test {
         amountColletral = bound(amountColletral,1,maxColletralToRedeem);
         dscBrain.redeemColletral(address(colletral), amountColletral);
     }
+
+// this breaks the invariants 
+    // function updateColletralPrice(uint96 newPrice ) public 
+    // {
+    //     int256 newPriceInt = int256(uint256(newPrice));
+    //     ethUsdPriceFeed.updateAnswer(newPriceInt);
+
+    // }
     /** Helper function */
     function _getColletralFromSeed(uint256 colletralSeed) private view returns (ERC20Mock) {
         if (colletralSeed % 2 == 0) {

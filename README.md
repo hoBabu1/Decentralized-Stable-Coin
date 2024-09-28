@@ -6,3 +6,6 @@
 3. Collateral: Exogenous(crytpo)
     1. wETH
     2. wBTC
+
+    Deployed on Sepolia Testnet -- 
+    https://sepolia.etherscan.io/address/0x3613ad520b0565e32233be06117633da2bc60ba7
